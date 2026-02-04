@@ -1,11 +1,13 @@
 import { SurfluxProvider } from "./surflux.js";
 import type { DataProvider } from "./types.js";
+import type { DeeptradeNetwork } from "../deepbook-config.js";
 
 export const SUPPORTED_PROVIDERS = ["surflux"] as const;
 export type ProviderName = (typeof SUPPORTED_PROVIDERS)[number];
 
 export interface ProviderFactoryOptions {
   providerName: string;
+  network: DeeptradeNetwork;
   restBaseUrl: string;
   streamBaseUrl: string;
 }
@@ -16,6 +18,7 @@ export function createProvider(options: ProviderFactoryOptions): DataProvider {
   switch (normalizedName) {
     case "surflux":
       return new SurfluxProvider({
+        network: options.network,
         restBaseUrl: options.restBaseUrl,
         streamBaseUrl: options.streamBaseUrl,
       });

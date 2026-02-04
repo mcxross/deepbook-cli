@@ -1,7 +1,9 @@
 import { getReadApiKey, getStreamApiKeyForPool, parsePool } from "../env.js";
 import { SurfluxClient } from "../http.js";
+import type { DeeptradeNetwork } from "../deepbook-config.js";
 import type {
   DataProvider,
+  MarginPoolsRequest,
   NormalizedOrderbook,
   OrderbookLevel,
   TradesStreamConnection,
@@ -11,6 +13,7 @@ import type {
 export type SurfluxStreamKind = "deepbook" | "deepbook-margin";
 
 export interface SurfluxProviderOptions {
+  network: DeeptradeNetwork;
   restBaseUrl: string;
   streamBaseUrl: string;
 }
@@ -26,6 +29,15 @@ interface SurfluxOrderbookResponse {
   asks?: unknown;
 }
 
+interface SurfluxMarginPool {
+  margin_pool_id?: unknown;
+}
+
+interface SurfluxRegisteredDeepbookPool {
+  base_margin_pool_id?: unknown;
+  quote_margin_pool_id?: unknown;
+}
+
 function parseStreamKind(value?: string): SurfluxStreamKind {
   const normalized = (value ?? "deepbook").trim();
   if (normalized === "deepbook" || normalized === "deepbook-margin") {
@@ -38,11 +50,13 @@ function parseStreamKind(value?: string): SurfluxStreamKind {
 
 export class SurfluxProvider implements DataProvider {
   readonly name = "surflux";
+  readonly network: DeeptradeNetwork;
   private readonly restBaseUrl: string;
   private readonly streamBaseUrl: string;
   private readonly client: SurfluxClient;
 
   constructor(options: SurfluxProviderOptions) {
+    this.network = options.network;
     this.restBaseUrl = options.restBaseUrl.replace(/\/+$/, "");
     this.streamBaseUrl = options.streamBaseUrl.replace(/\/+$/, "");
     this.client = new SurfluxClient({
@@ -51,8 +65,63 @@ export class SurfluxProvider implements DataProvider {
     });
   }
 
-  async getPools(): Promise<unknown> {
+  async getSpotPools(): Promise<unknown> {
     return this.client.getJson("/deepbook/get_pools");
+  }
+
+  async getMarginPools(request?: MarginPoolsRequest): Promise<unknown> {
+    const marginPools = await this.client.getJson("/deepbook-margin/pools");
+    if (!request?.registered) {
+      return marginPools;
+    }
+
+    const registered = await this.client.getJson("/deepbook-margin/registered-deepbook-pools");
+    if (!Array.isArray(marginPools) || !Array.isArray(registered)) {
+      throw new Error("Invalid Surflux response: expected arrays for margin pools filter.");
+    }
+
+    const registeredIds = this.collectRegisteredMarginPoolIds(registered);
+    return marginPools.filter((pool) => {
+      const poolId = this.readMarginPoolId(pool as SurfluxMarginPool);
+      return poolId ? registeredIds.has(poolId) : false;
+    });
+  }
+
+  async getPools(): Promise<unknown> {
+    const [spotPools, marginPools] = await Promise.all([
+      this.getSpotPools(),
+      this.getMarginPools(),
+    ]);
+
+    return {
+      spotPools,
+      marginPools,
+    };
+  }
+
+  private collectRegisteredMarginPoolIds(
+    registered: SurfluxRegisteredDeepbookPool[],
+  ): Set<string> {
+    const ids = new Set<string>();
+    for (const entry of registered) {
+      const baseId = this.readOptionalString(entry.base_margin_pool_id);
+      const quoteId = this.readOptionalString(entry.quote_margin_pool_id);
+      if (baseId) ids.add(baseId);
+      if (quoteId) ids.add(quoteId);
+    }
+    return ids;
+  }
+
+  private readMarginPoolId(pool: SurfluxMarginPool): string | null {
+    return this.readOptionalString(pool.margin_pool_id);
+  }
+
+  private readOptionalString(value: unknown): string | null {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
   }
 
   async getOrderbook(poolInput: string, depth: number): Promise<unknown> {

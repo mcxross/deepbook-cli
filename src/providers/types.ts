@@ -3,6 +3,10 @@ export interface TradesStreamRequest {
   kind?: string;
 }
 
+export interface MarginPoolsRequest {
+  registered?: boolean;
+}
+
 export interface OrderbookLevel {
   price: string;
   quantity: string;
@@ -22,6 +26,8 @@ export interface TradesStreamConnection {
 
 export interface DataProvider {
   readonly name: string;
+  getSpotPools(): Promise<unknown>;
+  getMarginPools(request?: MarginPoolsRequest): Promise<unknown>;
   getPools(): Promise<unknown>;
   getOrderbook(poolInput: string, depth: number): Promise<unknown>;
   normalizeOrderbook(raw: unknown): NormalizedOrderbook;

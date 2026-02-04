@@ -1,17 +1,16 @@
-const READ_API_KEY_ENV_CANDIDATES = [
-  "SURFLUX_API_KEY",
-  "API_KEY_READ",
-  "API_KEY",
-] as const;
+import {
+  getSurfluxReadApiKeyFromConfig,
+  getSurfluxStreamApiKeyFromConfig,
+  readDeeptradeConfig,
+} from "./deepbook-config.js";
 
 export function getReadApiKey(): string {
-  for (const envName of READ_API_KEY_ENV_CANDIDATES) {
-    const value = process.env[envName]?.trim();
-    if (value) return value;
-  }
+  const { config } = readDeeptradeConfig();
+  const configKey = getSurfluxReadApiKeyFromConfig(config);
+  if (configKey) return configKey;
 
   throw new Error(
-    `Missing read API key. Set one of: ${READ_API_KEY_ENV_CANDIDATES.join(", ")}.`,
+    'Missing read API key. Configure via "deepbook config set-read-key".',
   );
 }
 
@@ -59,13 +58,14 @@ export function getStreamApiKeyForPool(poolInput: string): {
 } {
   const { base, quote, poolName } = parsePool(poolInput);
   const envVarName = `API_KEY_STREAM_${base}_${quote}`;
-  const apiKey = process.env[envVarName]?.trim();
 
-  if (!apiKey) {
-    throw new Error(
-      `Missing stream API key for ${poolName}. Set ${envVarName}=<your-surflux-stream-key>.`,
-    );
+  const { config } = readDeeptradeConfig();
+  const fromConfig = getSurfluxStreamApiKeyFromConfig(config, poolName);
+  if (fromConfig.apiKey) {
+    return { apiKey: fromConfig.apiKey, envVarName, poolName };
   }
 
-  return { apiKey, envVarName, poolName };
+  throw new Error(
+    `Missing stream API key for ${poolName}. Configure via "deepbook config set-stream-key ${poolName} <key>".`,
+  );
 }
