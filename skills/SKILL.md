@@ -235,3 +235,8 @@ Use this when executing a real spot trade through a balance manager.
 3. Simulate order (`deepbook spot buy ... --dry-run`).
 4. Execute live order (same command without `--dry-run`).
 5. Monitor with `deepbook orderbook --watch` and `deepbook stream trades ...`.
+
+
+## Reference
+
+Find the DeepBook standard for design and smart contract info in `standards/deepbook` documentation
