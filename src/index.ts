@@ -1457,18 +1457,18 @@ async function run(): Promise<void> {
           return;
         }
 
+        await assertCanPlaceMarketOrder(runtime, {
+          poolKey,
+          quantity,
+          isBid,
+          payWithDeep: options.payWithDeep,
+        });
         const transaction = buildMarketOrderTransaction(runtime, {
           poolKey,
           clientOrderId,
           quantity,
           isBid,
           selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
-          payWithDeep: options.payWithDeep,
-        });
-        await assertCanPlaceMarketOrder(runtime, {
-          poolKey,
-          quantity,
-          isBid,
           payWithDeep: options.payWithDeep,
         });
         const result = await executeOrDryRunTransaction(
@@ -1889,7 +1889,7 @@ async function run(): Promise<void> {
       );
       const output = getOutputOptions(this);
       const expiration = options.expiration
-        ? parsePositiveInteger(options.expiration, "expiration")
+        ? parseExpirationTimestamp(options.expiration, "expiration")
         : undefined;
       const clientOrderId = (
         options.clientOrderId?.trim() || generateClientOrderId()
@@ -2183,6 +2183,29 @@ async function run(): Promise<void> {
         );
       }
 
+      let closeFeeBufferBaseAmount = 0;
+      let closeFeeBufferQuoteAmount = 0;
+      let closeFeeBufferDeepAmount = 0;
+      if (shouldPlaceCloseOrder && closeQuantity) {
+        const orderQuantity = closeQuantity;
+        closeFeeBufferBaseAmount =
+          options.payWithDeep || closeIsBid
+            ? 0
+            : estimateMarginFeeBuffer(orderQuantity, MIN_MARGIN_BASE_FEE_BUFFER);
+        closeFeeBufferQuoteAmount =
+          options.payWithDeep || !closeIsBid
+            ? 0
+            : estimateMarginFeeBuffer(
+                orderQuantity * (amountsBefore.quoteAsset > 0
+                  ? amountsBefore.quoteDebt / amountsBefore.baseAsset
+                  : Number(positionBefore.managerState.currentPrice) / 1e6),
+                MIN_MARGIN_QUOTE_FEE_BUFFER,
+              );
+        closeFeeBufferDeepAmount = options.payWithDeep
+          ? Math.max(MIN_MARGIN_DEEP_FEE_BUFFER, orderQuantity * 0.01)
+          : 0;
+      }
+
       const closeClientOrderId = generateClientOrderId();
       const closeResult = shouldSendCloseTx
         ? await executeOrDryRunTransaction(
@@ -2197,6 +2220,9 @@ async function run(): Promise<void> {
               payWithDeep: options.payWithDeep,
               repayBaseDebt,
               repayQuoteDebt,
+              ...(closeFeeBufferBaseAmount > 0 ? { feeBufferBaseAmount: closeFeeBufferBaseAmount } : {}),
+              ...(closeFeeBufferQuoteAmount > 0 ? { feeBufferQuoteAmount: closeFeeBufferQuoteAmount } : {}),
+              ...(closeFeeBufferDeepAmount > 0 ? { feeBufferDeepAmount: closeFeeBufferDeepAmount } : {}),
             }),
             options.dryRun,
           )

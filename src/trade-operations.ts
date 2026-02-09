@@ -225,7 +225,10 @@ function decodeMarginManagerIds(bytes: number[]): string[] {
 }
 
 function normalizeTypeSignature(input: string | null | undefined): string {
-  return (input ?? "").replace(/\s+/g, "").toLowerCase();
+  return (input ?? "")
+    .replace(/\s+/g, "")
+    .toLowerCase()
+    .replace(/0x[0-9a-f]+(?=::)/g, (addr) => normalizeSuiAddress(addr));
 }
 
 function marginManagerTypeMatchesPool(
@@ -1512,6 +1515,9 @@ export interface MarginCloseTransactionInput {
   payWithDeep: boolean;
   repayBaseDebt: boolean;
   repayQuoteDebt: boolean;
+  feeBufferBaseAmount?: number;
+  feeBufferQuoteAmount?: number;
+  feeBufferDeepAmount?: number;
 }
 
 export function buildMarginCloseTransaction(
@@ -1520,6 +1526,47 @@ export function buildMarginCloseTransaction(
 ): Transaction {
   const transaction = new Transaction();
   const marginManagerKey = getMarginManagerKey(runtime);
+  const marginManagerId = runtime.marginManagerId;
+  const feeBufferBaseAmount = input.feeBufferBaseAmount ?? 0;
+  const feeBufferQuoteAmount = input.feeBufferQuoteAmount ?? 0;
+  const feeBufferDeepAmount = input.feeBufferDeepAmount ?? 0;
+
+  if (feeBufferBaseAmount > 0 || feeBufferQuoteAmount > 0 || feeBufferDeepAmount > 0) {
+    if (!marginManagerId) {
+      throw new Error("Margin manager ID is required for fee-buffer deposits.");
+    }
+    const network = getMarginNetworkConfig(runtime, input.poolKey);
+
+    if (feeBufferBaseAmount > 0) {
+      addMarginDepositMoveCall(
+        transaction,
+        transaction.object(marginManagerId),
+        network,
+        network.baseCoinType,
+        toRawAmount(feeBufferBaseAmount, network.baseScalar, "base fee buffer"),
+      );
+    }
+
+    if (feeBufferQuoteAmount > 0) {
+      addMarginDepositMoveCall(
+        transaction,
+        transaction.object(marginManagerId),
+        network,
+        network.quoteCoinType,
+        toRawAmount(feeBufferQuoteAmount, network.quoteScalar, "quote fee buffer"),
+      );
+    }
+
+    if (feeBufferDeepAmount > 0) {
+      addMarginDepositMoveCall(
+        transaction,
+        transaction.object(marginManagerId),
+        network,
+        network.deepCoinType,
+        toRawAmount(feeBufferDeepAmount, network.deepScalar, "DEEP fee buffer"),
+      );
+    }
+  }
 
   if (input.quantity && input.quantity > 0) {
     if (typeof input.isBid !== "boolean") {
