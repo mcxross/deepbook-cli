@@ -22,4 +22,4 @@ Persistent global config is stored in `~/.deepbook/config.json` (created on firs
 
 ## AGENTS AND SKILLS
 
-DeepBook CLI provides a skills that extend agents to work intelligently with DeepBook
+You can find skills for this CLI [here](https://github.com/mcxross/skills)
