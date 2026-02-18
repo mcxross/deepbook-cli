@@ -23,3 +23,7 @@ Persistent global config is stored in `~/.deepbook/config.json` (created on firs
 ## AGENTS AND SKILLS
 
 You can find skills for this CLI [here](https://github.com/mcxross/skills)
+
+## License
+
+Apache License 2.0
