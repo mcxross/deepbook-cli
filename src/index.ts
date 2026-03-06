@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { createProvider, SUPPORTED_PROVIDERS } from "./providers/index.js";
 import type { DataProvider } from "./providers/types.js";
 import { printResult, printStreamEvent, type OutputOptions } from "./output.js";
-import { connectSSE } from "./sse.js";
 import {
   clearScreen,
   hideCursor,
@@ -1230,68 +1229,72 @@ async function run(): Promise<void> {
         options.reconnectDelayMs,
         "reconnect-delay-ms",
       );
-      const streamConnection = provider.createTradesStreamConnection({
-        poolInput,
-        kind: options.kind,
-      });
+      await new Promise<void>((resolve, reject) => {
+        let finished = false;
+        let subscription:
+          | ReturnType<typeof provider.subscribeTrades>
+          | undefined;
 
-      const controller = new AbortController();
-      const stop = () => {
-        controller.abort();
-      };
+        const finish = (error?: Error) => {
+          if (finished) {
+            return;
+          }
 
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
+          finished = true;
+          process.off("SIGINT", stop);
+          process.off("SIGTERM", stop);
+          if (error) {
+            reject(error);
+            return;
+          }
 
-      try {
-        while (!controller.signal.aborted) {
-          try {
-            await connectSSE({
-              url: streamConnection.url,
-              signal: controller.signal,
-              headers: streamConnection.headers,
-              onEvent: (event) => {
-                let parsedPayload: unknown = event.data;
-                try {
-                  parsedPayload = JSON.parse(event.data);
-                } catch {
-                  // Keep plain text payload if it is not JSON.
+          resolve();
+        };
+
+        const stop = () => {
+          subscription?.stop();
+          finish();
+        };
+
+        process.on("SIGINT", stop);
+        process.on("SIGTERM", stop);
+
+        subscription = provider.subscribeTrades(
+          {
+            poolInput,
+            kind: options.kind,
+          },
+          (event) => {
+            printStreamEvent(
+              event.event,
+              event.data,
+              output,
+              event.pool,
+            );
+          },
+          {
+            reconnect: options.reconnect,
+            reconnectDelayMs,
+            onError: (error) => {
+              if (error.name === "AbortError" || finished) {
+                return;
+              }
+
+              if (!output.json) {
+                console.error(`Stream error: ${error.message}`);
+                if (options.reconnect) {
+                  console.error(`Reconnecting in ${reconnectDelayMs}ms...`);
                 }
+              }
 
-                printStreamEvent(
-                  event.event,
-                  parsedPayload,
-                  output,
-                  streamConnection.poolLabel,
-                );
-              },
-            });
-          } catch (err) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            if (error.name === "AbortError" || controller.signal.aborted) {
-              break;
-            }
-
-            if (!options.reconnect) {
-              throw error;
-            }
-
-            if (!output.json) {
-              console.error(`Stream error: ${error.message}`);
-              console.error(`Reconnecting in ${reconnectDelayMs}ms...`);
-            }
-          }
-
-          if (!options.reconnect || controller.signal.aborted) {
-            break;
-          }
-
-          await sleep(reconnectDelayMs);
-        }
-      } finally {
-        process.off("SIGINT", stop);
-        process.off("SIGTERM", stop);
-      }
+              if (!options.reconnect) {
+                subscription?.stop();
+                finish(error);
+              }
+            },
+          },
+        );
+      });
     });
 
   const swap = program

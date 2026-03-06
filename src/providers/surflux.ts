@@ -1,32 +1,27 @@
-import { getReadApiKey, getStreamApiKeyForPool, parsePool } from "../env.js";
-import { SurfluxClient } from "../http.js";
+import {
+  SurfluxClient,
+  type OhlcvTimeframe,
+  type OrderbookResponse,
+  type OrderbookLevel as SurfluxSdkOrderbookLevel,
+  type SurfluxStreamKind,
+} from "@mcxross/surflux";
+import { getReadApiKey, getStreamApiKeys } from "../env.js";
 import type { DeeptradeNetwork } from "../deepbook-config.js";
 import type {
   DataProvider,
   MarginPoolsRequest,
   NormalizedOrderbook,
   OrderbookLevel,
-  TradesStreamConnection,
+  TradesStreamEvent,
+  TradesStreamOptions,
   TradesStreamRequest,
+  TradesSubscription,
 } from "./types.js";
-
-export type SurfluxStreamKind = "deepbook" | "deepbook-margin";
 
 export interface SurfluxProviderOptions {
   network: DeeptradeNetwork;
   restBaseUrl: string;
   streamBaseUrl: string;
-}
-
-interface SurfluxOrderbookLevel {
-  price?: unknown;
-  total_quantity?: unknown;
-  order_count?: unknown;
-}
-
-interface SurfluxOrderbookResponse {
-  bids?: unknown;
-  asks?: unknown;
 }
 
 interface SurfluxMarginPool {
@@ -51,31 +46,32 @@ function parseStreamKind(value?: string): SurfluxStreamKind {
 export class SurfluxProvider implements DataProvider {
   readonly name = "surflux";
   readonly network: DeeptradeNetwork;
-  private readonly restBaseUrl: string;
-  private readonly streamBaseUrl: string;
   private readonly client: SurfluxClient;
 
   constructor(options: SurfluxProviderOptions) {
     this.network = options.network;
-    this.restBaseUrl = options.restBaseUrl.replace(/\/+$/, "");
-    this.streamBaseUrl = options.streamBaseUrl.replace(/\/+$/, "");
     this.client = new SurfluxClient({
-      baseUrl: this.restBaseUrl,
-      apiKey: getReadApiKey(),
+      network: options.network,
+      restApiKey: getReadApiKey(),
+      sseApiKeys: getStreamApiKeys(),
+      restBaseUrl: options.restBaseUrl.replace(/\/+$/, ""),
+      streamBaseUrl: options.streamBaseUrl.replace(/\/+$/, ""),
     });
   }
 
   async getSpotPools(): Promise<unknown> {
-    return this.client.getJson("/deepbook/get_pools");
+    return this.client.getSpotPools();
   }
 
   async getMarginPools(request?: MarginPoolsRequest): Promise<unknown> {
-    const marginPools = await this.client.getJson("/deepbook-margin/pools");
+    const marginPools = await this.client.getMarginPools();
     if (!request?.registered) {
       return marginPools;
     }
 
-    const registered = await this.client.getJson("/deepbook-margin/registered-deepbook-pools");
+    // The SDK exposes the registered-pairs endpoint, but the CLI needs the original
+    // filtered margin-pools list shape, so we still compose that behavior locally.
+    const registered = await this.client.getRegisteredMarginPools();
     if (!Array.isArray(marginPools) || !Array.isArray(registered)) {
       throw new Error("Invalid Surflux response: expected arrays for margin pools filter.");
     }
@@ -125,12 +121,11 @@ export class SurfluxProvider implements DataProvider {
   }
 
   async getOrderbook(poolInput: string, depth: number): Promise<unknown> {
-    const { poolName } = parsePool(poolInput);
-    return this.client.getJson(`/deepbook/${poolName}/order-book-depth`, { limit: depth });
+    return this.client.getOrderbook(poolInput, { limit: depth });
   }
 
   normalizeOrderbook(raw: unknown): NormalizedOrderbook {
-    const response = raw as SurfluxOrderbookResponse;
+    const response = raw as OrderbookResponse;
     return {
       bids: this.normalizeLevels(response.bids, "bids"),
       asks: this.normalizeLevels(response.asks, "asks"),
@@ -138,29 +133,25 @@ export class SurfluxProvider implements DataProvider {
   }
 
   async getTrades(poolInput: string, limit: number): Promise<unknown> {
-    const { poolName } = parsePool(poolInput);
-    return this.client.getJson(`/deepbook/${poolName}/trades`, { limit });
+    return this.client.getTrades(poolInput, { limit });
   }
 
   async getOhlcv(poolInput: string, timeframe: string, limit: number): Promise<unknown> {
-    const { poolName } = parsePool(poolInput);
-    return this.client.getJson(`/deepbook/${poolName}/ohlcv/${timeframe}`, { limit });
+    return this.client.getOhlcv(poolInput, timeframe as OhlcvTimeframe, { limit });
   }
 
-  createTradesStreamConnection(request: TradesStreamRequest): TradesStreamConnection {
+  subscribeTrades(
+    request: TradesStreamRequest,
+    onEvent: (event: TradesStreamEvent) => void,
+    options: TradesStreamOptions = {},
+  ): TradesSubscription {
     const kind = parseStreamKind(request.kind);
-    const { poolName, apiKey } = getStreamApiKeyForPool(request.poolInput);
-
-    const streamUrl = new URL(`${this.streamBaseUrl}/${kind}/${poolName}/live-trades`);
-    streamUrl.searchParams.set("api-key", apiKey);
-
-    return {
-      poolLabel: poolName,
-      url: streamUrl.toString(),
-      headers: {
-        Accept: "text/event-stream",
-      },
-    };
+    return this.client.subscribeTrades(request.poolInput, onEvent, {
+      kind,
+      reconnect: options.reconnect,
+      reconnectDelayMs: options.reconnectDelayMs,
+      onError: options.onError,
+    });
   }
 
   private normalizeLevels(input: unknown, fieldName: string): OrderbookLevel[] {
@@ -168,11 +159,13 @@ export class SurfluxProvider implements DataProvider {
       throw new Error(`Invalid surflux orderbook payload: ${fieldName} is not an array.`);
     }
 
-    return input.map((level, index) => this.normalizeLevel(level as SurfluxOrderbookLevel, fieldName, index));
+    return input.map((level, index) =>
+      this.normalizeLevel(level as SurfluxSdkOrderbookLevel, fieldName, index),
+    );
   }
 
   private normalizeLevel(
-    level: SurfluxOrderbookLevel,
+    level: SurfluxSdkOrderbookLevel,
     fieldName: string,
     index: number,
   ): OrderbookLevel {

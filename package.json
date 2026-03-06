@@ -22,6 +22,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@mcxross/surflux": "^0.0.1",
     "@mysten/deepbook-v3": "^1.0.1",
     "@mysten/sui": "^2.1.0",
     "commander": "^12.1.0"

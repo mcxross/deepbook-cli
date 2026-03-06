@@ -18,10 +18,21 @@ export interface NormalizedOrderbook {
   asks: OrderbookLevel[];
 }
 
-export interface TradesStreamConnection {
-  poolLabel: string;
-  url: string;
-  headers?: Record<string, string>;
+export interface TradesStreamEvent {
+  event: string;
+  data: unknown;
+  id?: string;
+  pool: string;
+}
+
+export interface TradesStreamOptions {
+  reconnect?: boolean;
+  reconnectDelayMs?: number;
+  onError?: (error: Error) => void;
+}
+
+export interface TradesSubscription {
+  stop(): void;
 }
 
 export interface DataProvider {
@@ -33,5 +44,9 @@ export interface DataProvider {
   normalizeOrderbook(raw: unknown): NormalizedOrderbook;
   getTrades(poolInput: string, limit: number): Promise<unknown>;
   getOhlcv(poolInput: string, timeframe: string, limit: number): Promise<unknown>;
-  createTradesStreamConnection(request: TradesStreamRequest): TradesStreamConnection;
+  subscribeTrades(
+    request: TradesStreamRequest,
+    onEvent: (event: TradesStreamEvent) => void,
+    options?: TradesStreamOptions,
+  ): TradesSubscription;
 }
