@@ -129,3 +129,41 @@ describe("SurfluxProvider streams", () => {
     expect(result).toBe(subscription);
   });
 });
+
+describe("SurfluxProvider OHLCV", () => {
+  it("resolves the provider default timeframe when omitted", () => {
+    const provider = createProvider();
+
+    expect(provider.resolveOhlcvTimeframe()).toBe("5m");
+    expect(provider.defaultOhlcvTimeframe).toBe("5m");
+    expect(provider.supportedOhlcvTimeframes).toEqual([
+      "1m",
+      "5m",
+      "15m",
+      "1h",
+      "4h",
+      "1d",
+    ]);
+  });
+
+  it("passes supported timeframe values through to the SDK", async () => {
+    const provider = createProvider();
+    const payload = [{ open: "1.0" }];
+    client.getOhlcv.mockResolvedValueOnce(payload);
+
+    const result = await provider.getOhlcv("DEEP_SUI", "15m", 50);
+
+    expect(client.getOhlcv).toHaveBeenCalledWith("DEEP_SUI", "15m", {
+      limit: 50,
+    });
+    expect(result).toEqual(payload);
+  });
+
+  it("rejects unsupported timeframe values for surflux", () => {
+    const provider = createProvider();
+
+    expect(() => provider.resolveOhlcvTimeframe("30m")).toThrow(
+      /provider "surflux"/i,
+    );
+  });
+});

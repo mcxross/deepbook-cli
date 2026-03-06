@@ -1,13 +1,17 @@
 import {
   SurfluxClient,
-  type OhlcvTimeframe,
   type OrderbookResponse,
   type OrderbookLevel as SurfluxSdkOrderbookLevel,
   type SurfluxStreamKind,
 } from "@mcxross/surflux";
 import { getReadApiKey, getStreamApiKeys } from "../env.js";
 import type { DeeptradeNetwork } from "../deepbook-config.js";
+import {
+  COMMON_OHLCV_TIMEFRAMES,
+  parseProviderOhlcvTimeframe,
+} from "./types.js";
 import type {
+  CommonOhlcvTimeframe,
   DataProvider,
   MarginPoolsRequest,
   NormalizedOrderbook,
@@ -33,6 +37,10 @@ interface SurfluxRegisteredDeepbookPool {
   quote_margin_pool_id?: unknown;
 }
 
+export const SUPPORTED_SURFLUX_OHLCV_TIMEFRAMES = COMMON_OHLCV_TIMEFRAMES;
+export type SurfluxOhlcvTimeframe = CommonOhlcvTimeframe;
+const DEFAULT_SURFLUX_OHLCV_TIMEFRAME: SurfluxOhlcvTimeframe = "5m";
+
 function parseStreamKind(value?: string): SurfluxStreamKind {
   const normalized = (value ?? "deepbook").trim();
   if (normalized === "deepbook" || normalized === "deepbook-margin") {
@@ -43,8 +51,18 @@ function parseStreamKind(value?: string): SurfluxStreamKind {
   );
 }
 
-export class SurfluxProvider implements DataProvider {
+function resolveSurfluxOhlcvTimeframe(value?: string): SurfluxOhlcvTimeframe {
+  return parseProviderOhlcvTimeframe(
+    "surflux",
+    SUPPORTED_SURFLUX_OHLCV_TIMEFRAMES,
+    value ?? DEFAULT_SURFLUX_OHLCV_TIMEFRAME,
+  );
+}
+
+export class SurfluxProvider implements DataProvider<SurfluxOhlcvTimeframe> {
   readonly name = "surflux";
+  readonly supportedOhlcvTimeframes = SUPPORTED_SURFLUX_OHLCV_TIMEFRAMES;
+  readonly defaultOhlcvTimeframe = DEFAULT_SURFLUX_OHLCV_TIMEFRAME;
   readonly network: DeeptradeNetwork;
   private readonly client: SurfluxClient;
 
@@ -136,8 +154,18 @@ export class SurfluxProvider implements DataProvider {
     return this.client.getTrades(poolInput, { limit });
   }
 
-  async getOhlcv(poolInput: string, timeframe: string, limit: number): Promise<unknown> {
-    return this.client.getOhlcv(poolInput, timeframe as OhlcvTimeframe, { limit });
+  resolveOhlcvTimeframe(value?: string): SurfluxOhlcvTimeframe {
+    return resolveSurfluxOhlcvTimeframe(value);
+  }
+
+  async getOhlcv(
+    poolInput: string,
+    timeframe: SurfluxOhlcvTimeframe,
+    limit: number,
+  ): Promise<unknown> {
+    return this.client.getOhlcv(poolInput, resolveSurfluxOhlcvTimeframe(timeframe), {
+      limit,
+    });
   }
 
   subscribeTrades(

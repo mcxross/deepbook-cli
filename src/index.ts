@@ -1184,18 +1184,19 @@ async function run(): Promise<void> {
     .command("ohlcv")
     .description("Get OHLCV candles for a pool")
     .argument("<pool>", "Pool name, e.g. SUI_USDC")
-    .option("--timeframe <value>", "Timeframe (for example 1m, 5m, 1h)", "5m")
+    .option("--timeframe <value>", "Timeframe (provider-specific; defaults per provider)")
     .option("--limit <n>", "Number of candles to fetch", "100")
     .action(async function (
       this: Command,
       poolInput: string,
-      options: { timeframe: string; limit: string },
+      options: { timeframe?: string; limit: string },
     ) {
       const provider = createDataProvider(this);
       const output = getOutputOptions(this);
       const limit = parsePositiveInteger(options.limit, "limit");
+      const timeframe = provider.resolveOhlcvTimeframe(options.timeframe);
 
-      const data = await provider.getOhlcv(poolInput, options.timeframe, limit);
+      const data = await provider.getOhlcv(poolInput, timeframe, limit);
       printResult(data, output);
     });
 
