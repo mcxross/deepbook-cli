@@ -4,10 +4,14 @@
   "description": "DeepBook CLI",
   "author": "McXross",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcxross/deepbook-cli.git"
+  },
   "type": "module",
   "bin": {
-    "deepbook": "./dist/index.js",
-    "db": "./dist/index.js"
+    "deepbook": "dist/index.js",
+    "db": "dist/index.js"
   },
   "files": [
     "dist",
