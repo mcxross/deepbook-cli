@@ -74,6 +74,13 @@ import {
   setSurfluxStreamApiKey,
   setSurfluxStreamBaseUrl,
 } from "./deepbook-config.js";
+import {
+  runCrossPoolSpreadStrategy,
+  runMarginTrailingStopStrategy,
+  runSpotDcaStrategy,
+  runSpotGridStrategy,
+  runSpotTwapStrategy,
+} from "./strategies/index.js";
 
 interface GlobalOptions extends OutputOptions {
   provider: string;
@@ -200,6 +207,67 @@ interface AccountBalanceOptions {
   coin?: string;
 }
 
+interface RunTwapOptions {
+  manager?: string;
+  slices?: string;
+  selfMatch: string;
+  payWithDeep: boolean;
+  dryRun: boolean;
+}
+
+interface RunDcaOptions {
+  manager?: string;
+  orders: string;
+  priceLimit?: string;
+  maxRuntime: string;
+  selfMatch: string;
+  payWithDeep: boolean;
+  dryRun: boolean;
+}
+
+interface RunGridOptions {
+  manager?: string;
+  upper: string;
+  lower: string;
+  grids: string;
+  size: string;
+  side: string;
+  interval: string;
+  maxRuntime: string;
+  trailingStop?: string;
+  orderType: string;
+  selfMatch: string;
+  payWithDeep: boolean;
+  dryRun: boolean;
+}
+
+interface RunTrailingStopOptions {
+  marginManager?: string;
+  trail: string;
+  interval: string;
+  activation?: string;
+  repay: boolean;
+  selfMatch: string;
+  payWithDeep: boolean;
+  dryRun: boolean;
+}
+
+interface RunCrossPoolSpreadOptions {
+  marginManagerA?: string;
+  marginManagerB?: string;
+  sizeA: string;
+  sizeB: string;
+  entry: string;
+  close: string;
+  stopLoss?: string;
+  interval: string;
+  maxRuntime: string;
+  leverage: string;
+  selfMatch: string;
+  payWithDeep: boolean;
+  dryRun: boolean;
+}
+
 function resolveCliVersion(): string {
   try {
     const packageJsonPath = new URL("../package.json", import.meta.url);
@@ -224,6 +292,14 @@ function parsePositiveInteger(value: string, field: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`${field} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string, field: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${field} must be a non-negative integer.`);
   }
   return parsed;
 }
@@ -319,6 +395,18 @@ function createDataProvider(command: Command): DataProvider {
 function getOutputOptions(command: Command): OutputOptions {
   const globals = getGlobals(command);
   return { json: globals.json };
+}
+
+function createStrategyLogger(command: Command): (message: string) => void {
+  const output = getOutputOptions(command);
+  if (output.json) {
+    return () => {};
+  }
+
+  return (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`${timestamp} ${message}`);
+  };
 }
 
 async function resolveManagerId(
@@ -2311,6 +2399,418 @@ async function run(): Promise<void> {
           positionFinal: options.dryRun ? null : positionFinal,
         },
         output,
+      );
+    });
+
+  const runCommand = program
+    .command("run")
+    .description("Run client-side strategy loops with DeepBook execution");
+
+  runCommand
+    .command("twap <pool> <side> <size> <duration>")
+    .description("Execute TWAP by splitting spot market orders over time")
+    .option("--manager <id>", "Balance manager object ID")
+    .option("--slices <n>", "Number of slices (default: auto)")
+    .option("--self-match <value>", "allow|cancel-taker|cancel-maker", "allow")
+    .option("--no-pay-with-deep", "Do not pay fees with DEEP")
+    .option("--dry-run", "Build and simulate without broadcasting")
+    .action(async function (
+      this: Command,
+      poolKey: string,
+      sideInput: string,
+      size: string,
+      duration: string,
+      options: RunTwapOptions,
+    ) {
+      const side = sideInput.trim().toLowerCase();
+      if (side !== "buy" && side !== "sell") {
+        throw new Error(`Invalid side "${sideInput}". Expected buy or sell.`);
+      }
+
+      const managerId = await resolveManagerId(this, options.manager);
+      const runtime = createOnchainRuntime(this, { managerId });
+      const result = await runSpotTwapStrategy(
+        runtime,
+        {
+          poolKey,
+          side,
+          totalSize: parsePositiveNumber(size, "size"),
+          durationSec: parsePositiveInteger(duration, "duration"),
+          ...(options.slices?.trim()
+            ? { slices: parsePositiveInteger(options.slices, "slices") }
+            : {}),
+          payWithDeep: options.payWithDeep,
+          selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
+          dryRun: options.dryRun,
+        },
+        createStrategyLogger(this),
+      );
+
+      printResult(
+        {
+          execution: {
+            kind: "strategy",
+            strategy: "twap",
+            poolKey,
+            side,
+            managerId,
+          },
+          result,
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  runCommand
+    .command("dca <pool> <side> <amount> <interval>")
+    .description("Execute spot DCA with periodic market orders")
+    .option("--manager <id>", "Balance manager object ID")
+    .option("--orders <n>", "Total number of orders (0 = unlimited)", "0")
+    .option("--price-limit <value>", "Skip buys above / sells below this price")
+    .option("--max-runtime <sec>", "Maximum runtime in seconds (0 = unlimited)", "0")
+    .option("--self-match <value>", "allow|cancel-taker|cancel-maker", "allow")
+    .option("--no-pay-with-deep", "Do not pay fees with DEEP")
+    .option("--dry-run", "Build and simulate without broadcasting")
+    .action(async function (
+      this: Command,
+      poolKey: string,
+      sideInput: string,
+      amount: string,
+      interval: string,
+      options: RunDcaOptions,
+    ) {
+      const side = sideInput.trim().toLowerCase();
+      if (side !== "buy" && side !== "sell") {
+        throw new Error(`Invalid side "${sideInput}". Expected buy or sell.`);
+      }
+
+      const managerId = await resolveManagerId(this, options.manager);
+      const runtime = createOnchainRuntime(this, { managerId });
+      const result = await runSpotDcaStrategy(
+        runtime,
+        {
+          poolKey,
+          side,
+          amountPerOrder: parsePositiveNumber(amount, "amount"),
+          intervalSec: parsePositiveInteger(interval, "interval"),
+          totalOrders: parseNonNegativeInteger(options.orders, "orders"),
+          ...(options.priceLimit?.trim()
+            ? { priceLimit: parsePositiveNumber(options.priceLimit, "price-limit") }
+            : {}),
+          maxRuntimeSec: parseNonNegativeInteger(options.maxRuntime, "max-runtime"),
+          payWithDeep: options.payWithDeep,
+          selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
+          dryRun: options.dryRun,
+        },
+        createStrategyLogger(this),
+      );
+
+      printResult(
+        {
+          execution: {
+            kind: "strategy",
+            strategy: "dca",
+            poolKey,
+            side,
+            managerId,
+          },
+          result,
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  runCommand
+    .command("grid <pool>")
+    .description("Run a spot grid strategy with automatic limit-order replacement")
+    .requiredOption("--upper <price>", "Upper price bound")
+    .requiredOption("--lower <price>", "Lower price bound")
+    .option("--manager <id>", "Balance manager object ID")
+    .option("--grids <n>", "Number of grid lines", "10")
+    .option("--size <value>", "Total base quantity across the grid", "0.1")
+    .option("--side <value>", "Grid bias: long|short|neutral", "neutral")
+    .option("--interval <sec>", "Monitoring interval in seconds", "10")
+    .option("--max-runtime <sec>", "Maximum runtime in seconds (0 = unlimited)", "0")
+    .option("--trailing-stop <pct>", "Stop when adverse move exceeds this percentage")
+    .option("--order-type <value>", "none|ioc|fok|post-only", "none")
+    .option("--self-match <value>", "allow|cancel-taker|cancel-maker", "allow")
+    .option("--no-pay-with-deep", "Do not pay fees with DEEP")
+    .option("--dry-run", "Build and simulate without broadcasting")
+    .action(async function (
+      this: Command,
+      poolKey: string,
+      options: RunGridOptions,
+    ) {
+      const side = options.side.trim().toLowerCase();
+      if (side !== "long" && side !== "short" && side !== "neutral") {
+        throw new Error(
+          `Invalid side "${options.side}". Supported values: long, short, neutral.`,
+        );
+      }
+
+      const managerId = await resolveManagerId(this, options.manager);
+      const runtime = createOnchainRuntime(this, { managerId });
+      const result = await runSpotGridStrategy(
+        runtime,
+        {
+          poolKey,
+          side,
+          upperPrice: parsePositiveNumber(options.upper, "upper"),
+          lowerPrice: parsePositiveNumber(options.lower, "lower"),
+          grids: parsePositiveInteger(options.grids, "grids"),
+          totalSize: parsePositiveNumber(options.size, "size"),
+          intervalSec: parsePositiveInteger(options.interval, "interval"),
+          maxRuntimeSec: parseNonNegativeInteger(options.maxRuntime, "max-runtime"),
+          ...(options.trailingStop?.trim()
+            ? {
+                trailingStopPct: parsePositiveNumber(
+                  options.trailingStop,
+                  "trailing-stop",
+                ),
+              }
+            : {}),
+          orderType: parseOrderType(options.orderType),
+          selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
+          payWithDeep: options.payWithDeep,
+          dryRun: options.dryRun,
+        },
+        createStrategyLogger(this),
+      );
+
+      printResult(
+        {
+          execution: {
+            kind: "strategy",
+            strategy: "grid",
+            poolKey,
+            side,
+            managerId,
+          },
+          result,
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  runCommand
+    .command("trailing-stop <pool>")
+    .description("Monitor a margin position and close it on trailing stop trigger")
+    .requiredOption("--trail <pct>", "Trail percentage")
+    .option("--margin-manager <id>", "Margin manager object ID")
+    .option("--interval <sec>", "Monitoring interval in seconds", "5")
+    .option("--activation <price>", "Activate trailing only after crossing this price")
+    .option("--self-match <value>", "allow|cancel-taker|cancel-maker", "cancel-taker")
+    .option("--no-pay-with-deep", "Do not pay fees with DEEP")
+    .option("--no-repay", "Do not auto-repay margin debt after close")
+    .option("--dry-run", "Build and simulate without broadcasting")
+    .action(async function (
+      this: Command,
+      poolKey: string,
+      options: RunTrailingStopOptions,
+    ) {
+      const baseRuntime = createOnchainRuntime(this);
+      const explicitManager = resolveMarginManagerId(options.marginManager);
+
+      if (explicitManager) {
+        const managerMatchesPool = await isMarginManagerCompatibleWithPool(
+          baseRuntime,
+          poolKey,
+          explicitManager,
+          baseRuntime.address,
+        );
+        if (!managerMatchesPool) {
+          throw new Error(
+            `Provided --margin-manager ${explicitManager} is not compatible with ${poolKey} for signer ${baseRuntime.address}.`,
+          );
+        }
+      }
+
+      const marginManagerId =
+        explicitManager ?? (await findMarginManagerIdForPool(baseRuntime, poolKey));
+
+      if (!marginManagerId) {
+        throw new Error(
+          `No margin manager found for ${poolKey}. Pass --margin-manager <id> or open a margin position first.`,
+        );
+      }
+
+      const runtime = createMarginRuntime(this, poolKey, marginManagerId);
+      const result = await runMarginTrailingStopStrategy(
+        runtime,
+        {
+          poolKey,
+          trailPct: parsePositiveNumber(options.trail, "trail"),
+          intervalSec: parsePositiveInteger(options.interval, "interval"),
+          ...(options.activation?.trim()
+            ? {
+                activationPrice: parsePositiveNumber(
+                  options.activation,
+                  "activation",
+                ),
+              }
+            : {}),
+          payWithDeep: options.payWithDeep,
+          repay: options.repay,
+          selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
+          dryRun: options.dryRun,
+        },
+        createStrategyLogger(this),
+      );
+
+      printResult(
+        {
+          execution: {
+            kind: "strategy",
+            strategy: "trailing-stop",
+            poolKey,
+            marginManagerId,
+          },
+          result,
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  runCommand
+    .command("cross-pool-spread <poolA> <poolB>")
+    .description(
+      "Trade mean reversion between two pool mid-price ratios using paired margin legs",
+    )
+    .option(
+      "--margin-manager-a <id>",
+      "Margin manager for poolA (auto-discovered/created if omitted)",
+    )
+    .option(
+      "--margin-manager-b <id>",
+      "Margin manager for poolB (auto-discovered/created if omitted)",
+    )
+    .option("--size-a <value>", "Base quantity for poolA leg", "1")
+    .option("--size-b <value>", "Base quantity for poolB leg", "1")
+    .option("--entry <pct>", "Enter when absolute spread exceeds this %", "1")
+    .option("--close <pct>", "Close when absolute spread falls to this %", "0.2")
+    .option(
+      "--stop-loss <pct>",
+      "Optional adverse spread move from entry that forces close",
+    )
+    .option("--interval <sec>", "Polling interval in seconds", "10")
+    .option("--max-runtime <sec>", "Maximum runtime in seconds (0 = unlimited)", "0")
+    .option(
+      "--leverage <value>",
+      "Leverage multiplier used for both legs (must be > 1 for short leg borrowing)",
+      "2",
+    )
+    .option("--self-match <value>", "allow|cancel-taker|cancel-maker", "cancel-taker")
+    .option("--no-pay-with-deep", "Do not pay fees with DEEP")
+    .option("--dry-run", "Build and simulate without broadcasting")
+    .action(async function (
+      this: Command,
+      poolA: string,
+      poolB: string,
+      options: RunCrossPoolSpreadOptions,
+    ) {
+      if (poolA === poolB) {
+        throw new Error("poolA and poolB must be different pools.");
+      }
+
+      const sizeA = parsePositiveNumber(options.sizeA, "size-a");
+      const sizeB = parsePositiveNumber(options.sizeB, "size-b");
+      const entryThreshold = parsePositiveNumber(options.entry, "entry");
+      const closeThreshold = parseNonNegativeNumber(options.close, "close");
+      const stopLossThreshold = options.stopLoss?.trim()
+        ? parsePositiveNumber(options.stopLoss, "stop-loss")
+        : undefined;
+      const intervalSec = parsePositiveInteger(options.interval, "interval");
+      const maxRuntimeSec = parseNonNegativeInteger(options.maxRuntime, "max-runtime");
+      const leverage = parseLeverage(options.leverage);
+      if (leverage <= 1) {
+        throw new Error(
+          "cross-pool-spread requires leverage > 1 so the short leg can borrow base.",
+        );
+      }
+      if (closeThreshold >= entryThreshold) {
+        throw new Error(
+          `close threshold (${closeThreshold}) must be lower than entry threshold (${entryThreshold}).`,
+        );
+      }
+
+      const resolvedA = await resolveMarginRuntime(this, poolA, options.marginManagerA);
+      const resolvedB = await resolveMarginRuntime(this, poolB, options.marginManagerB);
+
+      const result = await runCrossPoolSpreadStrategy(
+        {
+          poolKey: poolA,
+          quantity: sizeA,
+          runtime: resolvedA.runtime,
+          marginManagerId: resolvedA.marginManagerId,
+          createdInTransaction: resolvedA.createdInTransaction,
+        },
+        {
+          poolKey: poolB,
+          quantity: sizeB,
+          runtime: resolvedB.runtime,
+          marginManagerId: resolvedB.marginManagerId,
+          createdInTransaction: resolvedB.createdInTransaction,
+        },
+        {
+          entryThresholdPct: entryThreshold,
+          closeThresholdPct: closeThreshold,
+          ...(stopLossThreshold ? { stopLossThresholdPct: stopLossThreshold } : {}),
+          intervalSec,
+          maxRuntimeSec,
+          leverage,
+          selfMatchingOption: parseSelfMatchingOption(options.selfMatch),
+          payWithDeep: options.payWithDeep,
+          dryRun: options.dryRun,
+        },
+        {
+          log: createStrategyLogger(this),
+          onLegManagerCreated: async ({ poolKey, managerId }) =>
+            createMarginRuntime(this, poolKey, managerId),
+        },
+      );
+
+      printResult(
+        {
+          execution: {
+            kind: "strategy",
+            strategy: "cross-pool-spread",
+            poolA,
+            poolB,
+            sizeA,
+            sizeB,
+            leverage,
+            marginManagerA: result.marginManagerA,
+            marginManagerB: result.marginManagerB,
+          },
+          thresholds: {
+            entryPct: entryThreshold,
+            closePct: closeThreshold,
+            stopLossPct: stopLossThreshold ?? null,
+          },
+          ...result,
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  runCommand
+    .command("funding-arb")
+    .description("Compatibility note for perp funding arbitrage strategy")
+    .action(function (this: Command) {
+      printResult(
+        {
+          supported: false,
+          strategy: "funding-arb",
+          reason:
+            "DeepBook CLI operates a single on-chain venue (spot + margin) and does not expose cross-exchange perp funding streams required by the original funding-arb strategy.",
+          alternatives: [
+            "deepbook run twap <pool> <buy|sell> <size> <duration>",
+            "deepbook run dca <pool> <buy|sell> <amount> <interval>",
+            "deepbook run grid <pool> --upper ... --lower ...",
+            "deepbook run trailing-stop <pool> --trail ...",
+          ],
+        },
+        getOutputOptions(this),
       );
     });
 
