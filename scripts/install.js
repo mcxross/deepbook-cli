@@ -2,6 +2,7 @@ import os from "node:os"
 import fs from "node:fs"
 import path from "node:path"
 import https from "node:https"
+import { execSync } from "node:child_process"
 
 const version = "v0.1.0"
 
@@ -10,42 +11,64 @@ const arch = os.arch()
 
 let file = ""
 
-if (platform === "linux" && arch === "x64") {
-    file = "deepbook-terminal-linux-x64"
-} else if (platform === "darwin" && arch === "arm64") {
-    file = "deepbook-terminal-macos-arm64"
+if (platform === "darwin" && arch === "arm64") {
+    file = "deepbook-terminal-darwin-arm64.tar.gz"
 } else if (platform === "darwin" && arch === "x64") {
-    file = "deepbook-terminal-macos-x64"
-} else if (platform === "win32") {
-    file = "deepbook-terminal-win-x64.exe"
+    file = "deepbook-terminal-darwin-amd64.tar.gz"
+} else if (platform === "linux" && arch === "x64") {
+    file = "deepbook-terminal-linux-amd64.tar.gz"
+} else if (platform === "linux" && arch === "arm64") {
+    file = "deepbook-terminal-linux-arm64.tar.gz"
 } else {
-    console.log("No Terminal binary for this platform")
+    console.log("No binary for this platform")
     process.exit(0)
 }
 
 const url =
     `https://github.com/mcxross/deepbook-terminal/releases/download/${version}/${file}`
 
-const outDir = path.join(
+const baseDir = path.join(
     process.cwd(),
     "node_modules",
-    "deepbook-cli",
-    "native"
+    "deepbook-cli"
 )
 
-fs.mkdirSync(outDir, { recursive: true })
+const nativeDir = path.join(baseDir, "native")
 
-const outPath = path.join(outDir, file)
+fs.mkdirSync(nativeDir, { recursive: true })
 
-console.log("Downloading DeepBook Terminal:", file)
+const archivePath = path.join(nativeDir, file)
+
+console.log("Downloading:", file)
 
 https.get(url, res => {
-    const fileStream = fs.createWriteStream(outPath)
+    const stream = fs.createWriteStream(archivePath)
 
-    res.pipe(fileStream)
+    res.pipe(stream)
 
-    fileStream.on("finish", () => {
-        fs.chmodSync(outPath, 0o755)
-        console.log("DeepBook Terminal installed")
+    stream.on("finish", () => {
+        console.log("Extracting...")
+
+        execSync(
+            `tar -xzf ${archivePath} -C ${nativeDir}`
+        )
+
+        const strikePath = path.join(nativeDir, "strike")
+
+        if (!fs.existsSync(strikePath)) {
+            console.error("strike binary not found")
+            process.exit(1)
+        }
+
+        const finalPath = path.join(
+            nativeDir,
+            "deepbook-terminal-ui"
+        )
+
+        fs.renameSync(strikePath, finalPath)
+
+        fs.chmodSync(finalPath, 0o755)
+
+        console.log("Installed DeepBook Terminal:", finalPath)
     })
 })

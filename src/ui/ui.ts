@@ -1,30 +1,24 @@
-import { spawnSync } from "node:child_process"
-import os from "node:os"
+import fs from "node:fs"
 import path from "node:path"
+import { spawnSync } from "node:child_process"
 
 export function runUI() {
-    const platform = os.platform()
+    const dir = path.join(
+        new URL(import.meta.url).pathname,
+        "../../native"
+    )
 
-    let bin = ""
+    const bin = path.join(
+        dir,
+        "deepbook-terminal-ui"
+    )
 
-    if (platform === "darwin") {
-        bin = "strike"
-    } else if (platform === "linux") {
-        bin = "strike"
-    } else if (platform === "win32") {
-        bin = "strike.exe"
-    } else {
-        console.error("Unsupported platform")
+    if (!fs.existsSync(bin)) {
+        console.error("DeepBook Terminal not installed")
         process.exit(1)
     }
 
-    const binPath = path.join(
-        new URL(import.meta.url).pathname,
-        "../../native",
-        bin
-    )
-
-    spawnSync(binPath, {
+    spawnSync(bin, {
         stdio: "inherit"
     })
 }
