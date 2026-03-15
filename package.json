@@ -1,6 +1,6 @@
 {
   "name": "deepbook-cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "DeepBook CLI",
   "author": "McXross",
   "license": "Apache-2.0",
@@ -9,12 +9,22 @@
     "url": "git+https://github.com/mcxross/deepbook-cli.git"
   },
   "type": "module",
+  "keywords": [
+    "deepbook",
+    "sui",
+    "dex",
+    "clob",
+    "cli",
+    "terminal",
+    "trading"
+  ],
   "bin": {
     "deepbook": "dist/index.js",
     "db": "dist/index.js"
   },
   "files": [
     "dist",
+    "scripts",
     "README.md"
   ],
   "scripts": {
