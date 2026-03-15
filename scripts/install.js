@@ -5,12 +5,10 @@ import https from "node:https"
 import { execSync } from "node:child_process"
 
 const version = "v0.1.0"
-
 const platform = os.platform()
 const arch = os.arch()
 
 let file = ""
-
 if (platform === "darwin" && arch === "arm64") {
     file = "deepbook-terminal-darwin-arm64.tar.gz"
 } else if (platform === "darwin" && arch === "x64") {
@@ -20,55 +18,57 @@ if (platform === "darwin" && arch === "arm64") {
 } else if (platform === "linux" && arch === "arm64") {
     file = "deepbook-terminal-linux-arm64.tar.gz"
 } else {
-    console.log("No binary for this platform")
     process.exit(0)
 }
 
-const url =
-    `https://github.com/mcxross/deepbook-terminal/releases/download/${version}/${file}`
+const url = `https://github.com/mcxross/deepbook-terminal/releases/download/${version}/${file}`
 
-const baseDir = path.join(
-    process.cwd(),
-    "node_modules",
-    "deepbook-cli"
-)
+const nativeDir = path.resolve(process.cwd(), "native")
+const archivePath = path.resolve(nativeDir, file)
 
-const nativeDir = path.join(baseDir, "native")
+if (!fs.existsSync(nativeDir)) {
+    fs.mkdirSync(nativeDir, { recursive: true })
+}
 
-fs.mkdirSync(nativeDir, { recursive: true })
+function download(downloadUrl) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            headers: {
+                'User-Agent': 'node.js',
+                ...(process.env.GITHUB_TOKEN ? { 'Authorization': `token ${process.env.GITHUB_TOKEN}` } : {})
+            }
+        }
+        https.get(downloadUrl, options, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                return download(res.headers.location).then(resolve).catch(reject)
+            }
+            if (res.statusCode !== 200) return reject(new Error(`Status ${res.statusCode}`))
 
-const archivePath = path.join(nativeDir, file)
+            const stream = fs.createWriteStream(archivePath)
+            res.pipe(stream)
+            stream.on("finish", () => stream.close(() => resolve()))
+        }).on("error", reject)
+    })
+}
 
-console.log("Downloading:", file)
-
-https.get(url, res => {
-    const stream = fs.createWriteStream(archivePath)
-
-    res.pipe(stream)
-
-    stream.on("finish", () => {
-        console.log("Extracting...")
-
-        execSync(
-            `tar -xzf ${archivePath} -C ${nativeDir}`
-        )
+async function main() {
+    try {
+        await download(url)
+        execSync(`tar -xzf "${archivePath}" -C "${nativeDir}"`)
 
         const strikePath = path.join(nativeDir, "strike")
+        const finalPath = path.join(nativeDir, "deepbook-terminal-ui")
 
-        if (!fs.existsSync(strikePath)) {
-            console.error("strike binary not found")
-            process.exit(1)
+        if (fs.existsSync(strikePath)) {
+            fs.renameSync(strikePath, finalPath)
         }
 
-        const finalPath = path.join(
-            nativeDir,
-            "deepbook-terminal-ui"
-        )
-
-        fs.renameSync(strikePath, finalPath)
-
         fs.chmodSync(finalPath, 0o755)
+        if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath)
+        process.exit(0)
+    } catch (err) {
+        process.exit(1)
+    }
+}
 
-        console.log("Installed DeepBook Terminal:", finalPath)
-    })
-})
+main()
