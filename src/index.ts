@@ -81,6 +81,7 @@ import {
   runSpotGridStrategy,
   runSpotTwapStrategy,
 } from "./strategies/index.js";
+import {runUI} from "./ui/ui.js";
 
 interface GlobalOptions extends OutputOptions {
   provider: string;
@@ -727,6 +728,11 @@ async function run(): Promise<void> {
       defaultTradeCap,
     )
     .showHelpAfterError();
+
+  program
+      .command("ui")
+      .description("Open DeepBook TUI")
+      .action(runUI);
 
   const configCommand = program
     .command("config")
