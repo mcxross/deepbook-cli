@@ -5,7 +5,23 @@ import { mainnetCoins, testnetCoins } from "@mysten/deepbook-v3";
 import { readFileSync } from "node:fs";
 import { createProvider, SUPPORTED_PROVIDERS } from "./providers/index.js";
 import type { DataProvider } from "./providers/types.js";
-import { printResult, printStreamEvent, type OutputOptions } from "./output.js";
+import { printResult, printStreamEvent } from "./output.js";
+import {
+  AccountBalanceOptions,
+  GlobalOptions, ManagerTxOptions,
+  MarginCloseOptions,
+  MarginDepositOptions,
+  MarginLimitOptions,
+  MarginPoolsOptions,
+  MarginPositionOptions,
+  MarginSpotOptions,
+  OrderbookOptions,
+  type OutputOptions, RunCrossPoolSpreadOptions, RunDcaOptions, RunGridOptions, RunTrailingStopOptions, RunTwapOptions,
+  SpotLimitOptions,
+  SpotOrderOptions,
+  StreamTradesOptions,
+  TradeSwapOptions
+} from "./types/index.js"
 import {
   clearScreen,
   hideCursor,
@@ -82,192 +98,6 @@ import {
   runSpotTwapStrategy,
 } from "./strategies/index.js";
 import {runUI} from "./ui/ui.js";
-
-interface GlobalOptions extends OutputOptions {
-  provider: string;
-  baseUrl?: string;
-  streamBaseUrl?: string;
-  network: string;
-  rpcUrl?: string;
-  privateKey?: string;
-  address?: string;
-  manager?: string;
-  tradeCap?: string;
-}
-
-interface StreamTradesOptions {
-  kind: string;
-  reconnect: boolean;
-  reconnectDelayMs: string;
-}
-
-interface OrderbookOptions {
-  depth: string;
-  watch?: boolean;
-  intervalMs: string;
-}
-
-interface SpotOrderOptions {
-  manager?: string;
-  quantity: string;
-  price?: string;
-  clientOrderId?: string;
-  expiration?: string;
-  orderType: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface SpotLimitOptions {
-  manager?: string;
-  cancel?: string;
-  side?: string;
-  price?: string;
-  quantity?: string;
-  clientOrderId?: string;
-  expiration?: string;
-  orderType: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface MarginLimitOptions {
-  marginManager?: string;
-  side: string;
-  price: string;
-  quantity: string;
-  leverage: string;
-  clientOrderId?: string;
-  expiration?: string;
-  orderType: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  reduceOnly: boolean;
-  dryRun: boolean;
-}
-
-interface MarginSpotOptions {
-  marginManager?: string;
-  side: string;
-  quantity: string;
-  leverage: string;
-  clientOrderId?: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  reduceOnly: boolean;
-  dryRun: boolean;
-}
-
-interface MarginDepositOptions {
-  marginManager?: string;
-  coin: string;
-  amount: string;
-  dryRun: boolean;
-}
-
-interface MarginPositionOptions {
-  marginManager?: string;
-}
-
-interface MarginPoolsOptions {
-  registered?: boolean;
-}
-
-interface MarginCloseOptions {
-  marginManager?: string;
-  side?: string;
-  quantity?: string;
-  full: boolean;
-  repay: boolean;
-  withdraw: boolean;
-  reduceOnly?: boolean;
-  nonReduceOnly?: boolean;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface TradeSwapOptions {
-  amount: string;
-  minOut: string;
-  deepAmount: string;
-  dryRun: boolean;
-}
-
-interface ManagerTxOptions {
-  manager?: string;
-  coin: string;
-  amount: string;
-  recipient?: string;
-  dryRun: boolean;
-}
-
-interface AccountBalanceOptions {
-  coin?: string;
-}
-
-interface RunTwapOptions {
-  manager?: string;
-  slices?: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface RunDcaOptions {
-  manager?: string;
-  orders: string;
-  priceLimit?: string;
-  maxRuntime: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface RunGridOptions {
-  manager?: string;
-  upper: string;
-  lower: string;
-  grids: string;
-  size: string;
-  side: string;
-  interval: string;
-  maxRuntime: string;
-  trailingStop?: string;
-  orderType: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface RunTrailingStopOptions {
-  marginManager?: string;
-  trail: string;
-  interval: string;
-  activation?: string;
-  repay: boolean;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
-
-interface RunCrossPoolSpreadOptions {
-  marginManagerA?: string;
-  marginManagerB?: string;
-  sizeA: string;
-  sizeB: string;
-  entry: string;
-  close: string;
-  stopLoss?: string;
-  interval: string;
-  maxRuntime: string;
-  leverage: string;
-  selfMatch: string;
-  payWithDeep: boolean;
-  dryRun: boolean;
-}
 
 function resolveCliVersion(): string {
   try {

@@ -1,6 +1,4 @@
-export interface OutputOptions {
-  json: boolean;
-}
+import {OutputOptions} from "./types/index.js";
 
 export function printResult(value: unknown, options: OutputOptions): void {
   if (options.json) {
