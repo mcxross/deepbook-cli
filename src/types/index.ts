@@ -12,6 +12,8 @@ export interface GlobalOptions extends OutputOptions {
     address?: string;
     manager?: string;
     tradeCap?: string;
+    predictUrl?: string;
+    predictId?: string;
 }
 
 export interface StreamTradesOptions {

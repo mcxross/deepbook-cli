@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 import { createProvider, SUPPORTED_PROVIDERS } from "./providers/index.js";
 import type { DataProvider } from "./providers/types.js";
 import { printResult, printStreamEvent } from "./output.js";
+import { HttpClient } from "./clients/http-client.js";
+import { PredictClient } from "./predict/PredictClient.js";
+import { PREDICT_TESTNET_DEFAULTS } from "./predict/constants.js";
+import { PREDICT_RANGE_VALUES, type PageQuery, type PredictRange } from "./predict/types.js";
 import {
   AccountBalanceOptions,
   GlobalOptions, ManagerTxOptions,
@@ -195,6 +199,55 @@ function parseNonNegativeNumber(value: string, field: string): number {
     throw new Error(`${field} must be a non-negative number.`);
   }
   return parsed;
+}
+
+function parsePredictRange(value: string): PredictRange {
+  const normalized = value.trim();
+  if (PREDICT_RANGE_VALUES.includes(normalized as PredictRange)) {
+    return normalized as PredictRange;
+  }
+
+  throw new Error(
+    `Invalid Predict range "${value}". Supported values: ${PREDICT_RANGE_VALUES.join(", ")}.`,
+  );
+}
+
+function parsePageQuery(options: { limit?: string; cursor?: string }): PageQuery {
+  const query: PageQuery = {};
+  if (options.limit !== undefined) {
+    query.limit = parsePositiveInteger(options.limit, "limit");
+  }
+  if (options.cursor?.trim()) {
+    query.cursor = options.cursor.trim();
+  }
+  return query;
+}
+
+function resolvePredictServerUrl(command: Command): string {
+  const globals = getGlobals(command);
+  const explicit = globals.predictUrl?.trim();
+  if (explicit) {
+    new URL(explicit);
+    return explicit;
+  }
+  return PREDICT_TESTNET_DEFAULTS.serverUrl;
+}
+
+function resolvePredictId(command: Command, localPredictId?: string): string {
+  const globals = getGlobals(command);
+  return (
+    localPredictId?.trim() ||
+    globals.predictId?.trim() ||
+    PREDICT_TESTNET_DEFAULTS.predictId
+  );
+}
+
+function createPredictClient(command: Command): PredictClient {
+  return new PredictClient(
+    new HttpClient({
+      baseUrl: resolvePredictServerUrl(command),
+    }),
+  );
 }
 
 function parseExpirationTimestamp(value: string, field: string): number {
@@ -557,12 +610,365 @@ async function run(): Promise<void> {
       "Optional DeepBook trade cap object ID",
       defaultTradeCap,
     )
+    .option(
+      "--predict-url <url>",
+      "DeepBook Predict server URL (defaults to Sui Testnet public server)",
+    )
+    .option(
+      "--predict-id <id>",
+      "DeepBook Predict object ID (defaults to current Testnet object)",
+    )
     .showHelpAfterError();
 
   program
       .command("ui")
       .description("Open DeepBook TUI")
       .action(runUI);
+
+  const predict = program
+    .command("predict")
+    .description("Read DeepBook Predict data");
+
+  predict
+    .command("status")
+    .description("Get Predict server health and indexer status")
+    .action(async function (this: Command) {
+      printResult(await createPredictClient(this).status(), getOutputOptions(this));
+    });
+
+  predict
+    .command("info")
+    .description("Show built-in Predict Testnet deployment defaults")
+    .action(async function (this: Command) {
+      printResult(
+        {
+          ...PREDICT_TESTNET_DEFAULTS,
+          activeServerUrl: resolvePredictServerUrl(this),
+          activePredictId: resolvePredictId(this),
+        },
+        getOutputOptions(this),
+      );
+    });
+
+  predict
+    .command("state")
+    .description("Get Predict object state and config")
+    .option("--predict-id <id>", "Predict object ID override")
+    .action(async function (this: Command, options: { predictId?: string }) {
+      const client = createPredictClient(this);
+      printResult(
+        await client.getPredictState(resolvePredictId(this, options.predictId)),
+        getOutputOptions(this),
+      );
+    });
+
+  predict
+    .command("oracles")
+    .description("Get oracles for the Predict object")
+    .option("--predict-id <id>", "Predict object ID override")
+    .action(async function (this: Command, options: { predictId?: string }) {
+      const client = createPredictClient(this);
+      printResult(
+        await client.getOracles(resolvePredictId(this, options.predictId)),
+        getOutputOptions(this),
+      );
+    });
+
+  predict
+    .command("quote-assets")
+    .description("Get accepted Predict quote assets")
+    .option("--predict-id <id>", "Predict object ID override")
+    .action(async function (this: Command, options: { predictId?: string }) {
+      const client = createPredictClient(this);
+      printResult(
+        await client.getQuoteAssets(resolvePredictId(this, options.predictId)),
+        getOutputOptions(this),
+      );
+    });
+
+  const predictOracle = predict
+    .command("oracle")
+    .description("Read Predict oracle data");
+
+  predictOracle
+    .command("state")
+    .description("Get current oracle state")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .action(async function (this: Command, oracleId: string) {
+      printResult(
+        await createPredictClient(this).getOracleState(oracleId),
+        getOutputOptions(this),
+      );
+    });
+
+  predictOracle
+    .command("ask-bounds")
+    .description("Get resolved oracle ask bounds")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .action(async function (this: Command, oracleId: string) {
+      printResult(
+        await createPredictClient(this).getOracleAskBounds(oracleId),
+        getOutputOptions(this),
+      );
+    });
+
+  predictOracle
+    .command("prices")
+    .description("Get oracle price history")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      oracleId: string,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getPriceHistory(
+          oracleId,
+          parsePageQuery(options),
+        ),
+        getOutputOptions(this),
+      );
+    });
+
+  predictOracle
+    .command("price-latest")
+    .description("Get latest indexed oracle price update")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .action(async function (this: Command, oracleId: string) {
+      printResult(
+        await createPredictClient(this).getLatestPrice(oracleId),
+        getOutputOptions(this),
+      );
+    });
+
+  predictOracle
+    .command("svi")
+    .description("Get oracle SVI history")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      oracleId: string,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getSviHistory(
+          oracleId,
+          parsePageQuery(options),
+        ),
+        getOutputOptions(this),
+      );
+    });
+
+  predictOracle
+    .command("svi-latest")
+    .description("Get latest indexed oracle SVI update")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .action(async function (this: Command, oracleId: string) {
+      printResult(
+        await createPredictClient(this).getLatestSvi(oracleId),
+        getOutputOptions(this),
+      );
+    });
+
+  const predictVault = predict
+    .command("vault")
+    .description("Read Predict vault and LP state");
+
+  predictVault
+    .command("summary")
+    .description("Get current vault summary")
+    .option("--predict-id <id>", "Predict object ID override")
+    .action(async function (this: Command, options: { predictId?: string }) {
+      printResult(
+        await createPredictClient(this).getVaultSummary(
+          resolvePredictId(this, options.predictId),
+        ),
+        getOutputOptions(this),
+      );
+    });
+
+  predictVault
+    .command("performance")
+    .description("Get vault performance over a selected range")
+    .option("--predict-id <id>", "Predict object ID override")
+    .option("--range <value>", "1D|7D|30D|90D|ALL", "ALL")
+    .action(async function (
+      this: Command,
+      options: { predictId?: string; range: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getVaultPerformance(
+          resolvePredictId(this, options.predictId),
+          { range: parsePredictRange(options.range) },
+        ),
+        getOutputOptions(this),
+      );
+    });
+
+  const predictLp = predict
+    .command("lp")
+    .description("Read Predict LP history");
+
+  predictLp
+    .command("supplies")
+    .description("Get LP supply history")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getSupplyHistory(parsePageQuery(options)),
+        getOutputOptions(this),
+      );
+    });
+
+  predictLp
+    .command("withdrawals")
+    .description("Get LP withdrawal history")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getWithdrawalHistory(
+          parsePageQuery(options),
+        ),
+        getOutputOptions(this),
+      );
+    });
+
+  predict
+    .command("managers")
+    .description("Get Predict manager list")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getManagers(parsePageQuery(options)),
+        getOutputOptions(this),
+      );
+    });
+
+  const predictManager = predict
+    .command("manager")
+    .description("Read Predict manager data");
+
+  predictManager
+    .command("summary")
+    .description("Get manager summary")
+    .argument("<managerId>", "Predict manager object ID")
+    .action(async function (this: Command, managerId: string) {
+      printResult(
+        await createPredictClient(this).getManagerSummary(managerId),
+        getOutputOptions(this),
+      );
+    });
+
+  predictManager
+    .command("positions")
+    .description("Get manager position summary")
+    .argument("<managerId>", "Predict manager object ID")
+    .action(async function (this: Command, managerId: string) {
+      printResult(
+        await createPredictClient(this).getManagerPositionsSummary(managerId),
+        getOutputOptions(this),
+      );
+    });
+
+  predictManager
+    .command("pnl")
+    .description("Get manager PnL over a selected range")
+    .argument("<managerId>", "Predict manager object ID")
+    .option("--range <value>", "1D|7D|30D|90D|ALL", "ALL")
+    .action(async function (
+      this: Command,
+      managerId: string,
+      options: { range: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getManagerPnl(managerId, {
+          range: parsePredictRange(options.range),
+        }),
+        getOutputOptions(this),
+      );
+    });
+
+  const predictHistory = predict
+    .command("history")
+    .description("Read Predict historical events");
+
+  const addPredictHistoryCommand = (
+    commandName: string,
+    description: string,
+    load: (client: PredictClient, query: PageQuery) => Promise<unknown>,
+  ) => {
+    predictHistory
+      .command(commandName)
+      .description(description)
+      .option("--limit <n>", "Number of rows to fetch")
+      .option("--cursor <value>", "Pagination cursor")
+      .action(async function (
+        this: Command,
+        options: { limit?: string; cursor?: string },
+      ) {
+        printResult(
+          await load(createPredictClient(this), parsePageQuery(options)),
+          getOutputOptions(this),
+        );
+      });
+  };
+
+  addPredictHistoryCommand(
+    "positions-minted",
+    "Get position mint history",
+    (client, query) => client.getMintHistory(query),
+  );
+  addPredictHistoryCommand(
+    "positions-redeemed",
+    "Get position redeem history",
+    (client, query) => client.getRedeemHistory(query),
+  );
+  addPredictHistoryCommand(
+    "ranges-minted",
+    "Get range mint history",
+    (client, query) => client.getRangeMintHistory(query),
+  );
+  addPredictHistoryCommand(
+    "ranges-redeemed",
+    "Get range redeem history",
+    (client, query) => client.getRangeRedeemHistory(query),
+  );
+
+  predictHistory
+    .command("trades")
+    .description("Get trade history for an oracle")
+    .argument("<oracleId>", "Predict oracle object ID")
+    .option("--limit <n>", "Number of rows to fetch")
+    .option("--cursor <value>", "Pagination cursor")
+    .action(async function (
+      this: Command,
+      oracleId: string,
+      options: { limit?: string; cursor?: string },
+    ) {
+      printResult(
+        await createPredictClient(this).getTradeHistory(
+          oracleId,
+          parsePageQuery(options),
+        ),
+        getOutputOptions(this),
+      );
+    });
 
   const configCommand = program
     .command("config")
