@@ -10,9 +10,123 @@ permissions:
   id-token: write
 
 jobs:
+  build-tui:
+    name: Build TUI release binaries
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: deepbook-terminal-linux-amd64.tar.gz
+            arch: x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: deepbook-terminal-linux-arm64.tar.gz
+            arch: aarch64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: deepbook-terminal-darwin-amd64.tar.gz
+            arch: x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: deepbook-terminal-darwin-arm64.tar.gz
+            arch: aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: deepbook-terminal-windows-amd64.zip
+            arch: x86_64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: deepbook-terminal-linux-musl-amd64.tar.gz
+            arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: deepbook-terminal-linux-musl-arm64.tar.gz
+            arch: aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            tui/target/
+          key: ${{ runner.os }}-tui-release-cargo-${{ matrix.target }}-${{ hashFiles('tui/**/Cargo.toml') }}
+
+      - name: Install Musl tool
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl'
+        run: sudo apt-get install musl-tools
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          target: ${{ matrix.target }}
+
+      - name: Build TUI
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --manifest-path tui/Cargo.toml --release --target ${{ matrix.target }} --config 'package.version="${{ steps.release.outputs.version }}"'
+          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
+
+      - name: Prepare artifact [Windows]
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          cd tui/target/${{ matrix.target }}/release
+          7z a ../../../../${{ matrix.name }} strike.exe
+
+      - name: Prepare artifact [Linux & macOS]
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          cd tui/target/${{ matrix.target }}/release
+          strip strike || true
+          tar czvf ../../../../${{ matrix.name }} strike
+
+      - name: Test binary [Linux & macOS]
+        if: matrix.arch == 'x86_64' && matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          cd tui/target/${{ matrix.target }}/release
+          ./strike --version
+
+      - name: Test binary [Windows]
+        if: matrix.arch == 'x86_64' && matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          cd tui/target/${{ matrix.target }}/release
+          ./strike.exe --version
+
+      - name: Upload TUI artifact to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.name }}
+
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs:
+      - build-tui
 
     steps:
       - name: Checkout

@@ -24,12 +24,25 @@ deepbook --help
 db --help
 ```
 
+The npm postinstall step downloads the matching native DeepBook Terminal binary when one is available. Launch it with:
+
+```bash
+deepbook ui
+```
+
 For local development:
 
 ```bash
 pnpm install
 pnpm build
 node dist/index.js --help
+```
+
+Build the bundled Rust TUI locally when working on terminal changes:
+
+```bash
+cargo build --release --manifest-path tui/Cargo.toml
+node dist/index.js ui
 ```
 
 ## Predict

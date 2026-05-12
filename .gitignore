@@ -1,9 +1,15 @@
 # dependencies
 node_modules/
 
-# build outputs
+# build outputs (TypeScript/npm)
 dist/
+native/
 *.tsbuildinfo
+
+# build outputs (Rust TUI)
+tui/target/
+tui/**/target/
+tui/Cargo.lock
 
 # local environment files
 .env
