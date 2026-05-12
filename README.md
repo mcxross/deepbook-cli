@@ -30,21 +30,6 @@ The npm postinstall step downloads the matching native DeepBook Terminal binary 
 deepbook ui
 ```
 
-For local development:
-
-```bash
-pnpm install
-pnpm build
-node dist/index.js --help
-```
-
-Build the bundled Rust TUI locally when working on terminal changes:
-
-```bash
-cargo build --release --manifest-path tui/Cargo.toml
-node dist/index.js ui
-```
-
 ## Predict
 
 DeepBook Predict is a DeepBook-adjacent prediction-market protocol on Sui. In this CLI, Predict support is currently
@@ -109,7 +94,8 @@ deepbook --predict-id <predictObjectId> predict state
 
 ## Margin
 
-Margin commands execute DeepBook margin trades through typed margin manager objects. A margin manager is pair-specific: a manager for `DEEP_USDC` is not valid for `DEEP_SUI`.
+Margin commands execute DeepBook margin trades through typed margin manager objects. A margin manager is pair-specific:
+a manager for `DEEP_USDC` is not valid for `DEEP_SUI`.
 
 Discover margin pools and compatible managers:
 
@@ -146,7 +132,8 @@ deepbook margin close DEEP_USDC --full --withdraw
 
 Margin safety defaults:
 
-- If `--margin-manager` is omitted, the CLI auto-selects a compatible manager or creates one in the transaction when supported.
+- If `--margin-manager` is omitted, the CLI auto-selects a compatible manager or creates one in the transaction when
+supported.
 - If `--margin-manager` is provided, it must match the signer and the pool pair.
 - Use `--dry-run` before broadcasting.
 - Use `--reduce-only` when you want close orders to reduce exposure only.
@@ -219,7 +206,9 @@ The CLI has three main surfaces:
 - Execute spot trades: DeepBook spot market/limit orders using balance managers.
 - Execute margin trades: DeepBook margin orders using typed margin managers.
 
-The read layer is intentionally provider-aware. Market data commands use the configured provider, currently Surflux by default. On-chain commands use Sui RPC plus DeepBook package metadata from `@mysten/deepbook-v3`. Predict commands use the public Predict server by default and do not submit transactions.
+The read layer is intentionally provider-aware. Market data commands use the configured provider, currently Surflux by
+default. On-chain commands use Sui RPC plus DeepBook package metadata from `@mysten/deepbook-v3`. Predict commands use
+the public Predict server by default and do not submit transactions.
 
 ## Configuration
 
@@ -315,6 +304,13 @@ Run strategy commands with `--dry-run` first when supported.
 pnpm install
 pnpm build
 pnpm test
+```
+
+Build the bundled Rust TUI locally when working on terminal changes:
+
+```bash
+cargo build --release --manifest-path tui/Cargo.toml
+node dist/index.js ui
 ```
 
 The package currently declares Node.js `>=22`.
