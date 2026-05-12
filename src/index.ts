@@ -10,6 +10,7 @@ import { HttpClient } from "./clients/http-client.js";
 import { PredictClient } from "./predict/PredictClient.js";
 import { PREDICT_TESTNET_DEFAULTS } from "./predict/constants.js";
 import { PREDICT_RANGE_VALUES, type PageQuery, type PredictRange } from "./predict/types.js";
+import { maybePromptForUpdate, runSelfUpdate } from "./self-update.js";
 import {
   AccountBalanceOptions,
   GlobalOptions, ManagerTxOptions,
@@ -624,6 +625,53 @@ async function run(): Promise<void> {
       .command("ui")
       .description("Open DeepBook TUI")
       .action(runUI);
+
+  program
+    .command("update")
+    .description("Update DeepBook CLI")
+    .option(
+      "--version <value>",
+      "Package version or dist-tag to install",
+      "latest",
+    )
+    .option(
+      "--package-manager <name>",
+      "Package manager to use (npm|pnpm|bun)",
+    )
+    .option("--dry-run", "Print the update command without running it")
+    .option("-y, --yes", "Skip the pre-update summary")
+    .action(async function (
+      this: Command,
+      options: {
+        version?: string;
+        packageManager?: string;
+        dryRun?: boolean;
+        yes?: boolean;
+      },
+    ) {
+      const plan = await runSelfUpdate(resolveCliVersion(), options);
+      if (options.dryRun) {
+        printResult(
+          {
+            currentVersion: plan.currentVersion,
+            target: plan.target,
+            packageManager: plan.packageManager,
+            command: [plan.command, ...plan.args].join(" "),
+          },
+          getOutputOptions(this),
+        );
+        return;
+      }
+
+      printResult(
+        {
+          updated: true,
+          target: plan.target,
+          packageManager: plan.packageManager,
+        },
+        getOutputOptions(this),
+      );
+    });
 
   const predict = program
     .command("predict")
@@ -3161,6 +3209,14 @@ async function run(): Promise<void> {
       const balance = await queryManagerBalance(runtime, options.coin);
       printResult(balance, getOutputOptions(this));
     });
+
+  const updatedFromPrompt = await maybePromptForUpdate(
+    resolveCliVersion(),
+    { args: process.argv },
+  );
+  if (updatedFromPrompt) {
+    return;
+  }
 
   await program.parseAsync(process.argv);
 }
